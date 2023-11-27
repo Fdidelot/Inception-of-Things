@@ -1,0 +1,50 @@
+machines=[
+	{
+		:hostname => "fdidelotS",
+		:ip => "192.168.56.110",
+		:ram => 1024,
+		:cpus => 1,
+		:type => "server"
+	},
+	{
+		:hostname => "fdidelotSW",
+		:ip => "192.168.56.111",
+		:ram => 1024,
+		:cpus => 1,
+		:type => "agent"
+	}
+]
+
+Vagrant.configure(2) do |config|
+	config.vm.box = "generic/centos8"
+	config.vm.synced_folder "./token_folder", "/home/vagrant/token_folder", create: true
+	config.vm.provision "shell", privileged: true, inline: "systemctl disable firewalld --now"
+
+	machines.each do |machine|
+		config.vm.define machine[:hostname] do |cfg|
+			cfg.vm.hostname = machine[:hostname]
+			cfg.vm.network "private_network", ip: machine[:ip]
+			cfg.vm.provider "virtualbox" do |vb|
+				vb.name = machine[:hostname]
+				vb.memory = machine[:ram]
+				vb.cpus = machine[:cpus]
+			end
+			if machine[:type] == "server"
+				cfg.vm.provision "shell", inline:<<-SHELL
+				curl -sfL https://get.k3s.io | sh -s - \
+				--write-kubeconfig-mode=644 \
+				--flannel-iface=eth1
+				sudo cp /var/lib/rancher/k3s/server/node-token /home/vagrant/token_folder/
+				sudo chmod +r /home/vagrant/token_folder/node-token
+				SHELL
+			else
+				cfg.vm.provision "shell", inline:<<-SHELL
+				curl -sfL https://get.k3s.io | sh -s - agent \
+				--token-file /home/vagrant/token_folder/node-token \
+				--server https://192.168.56.110:6443 \
+				--node-ip 192.168.56.111
+				SHELL
+			end
+		end
+	end
+end
